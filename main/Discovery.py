@@ -5,12 +5,10 @@ Created on 18/09/2013
 '''
 from ConfigObject import ConfigObject
 import ast
-import dbus
-import sys
+from threading import Thread
+import threading
 import time
 import usb
-
-import main
 
 
 DEVICE_NAME = 'name'
@@ -18,14 +16,18 @@ DEVICE_VENDORID = 'vendorid'
 DEVICE_PRODUCTID = 'productid'
 DEVICE_MANUFACTURER = 'manufacturer'
 
-class findUSB(object):
-    def __init__(self, observer):
+class Action(object):
+    ADD, REMOVE = range(0,2)
+
+class FindUSB(threading.Thread):
+    def __init__(self, update):
+        Thread.__init__(self)
         self.CONFIG_FILENAME = 'devices.ini'
         self.configuration = ConfigObject(filename=self.CONFIG_FILENAME)
         devicesNames = dict(self.configuration.devices)
         self.deviceItems = (devicesNames.items())
         self.devicesActives = {}
-        self.observer = observer
+        self.update = update        
     
     def _filter(self,dev):
         if dev.bDeviceClass == usb.legacy.CLASS_COMM: 
@@ -63,40 +65,65 @@ class findUSB(object):
             device = self.devicesActives[key]
             if device.idVendor in dataToRemove.keys():
                 if device.idProduct == dataToRemove[device.idVendor]:
-                    print("Removing "+key)                     
+                    print("Removing "+key)
+                    self.update(Action.REMOVE, key)                     
                     del self.devicesActives[key]
+                    
                     return
+                
+    def _clearDeviceList(self):
+        for key in self.devicesActives:
+            self.update(Action.REMOVE, key)
+        self.devicesActives.clear()
                     
     def run(self):
         while(True):
-            dev = []      
+            dev = []
+            devicesToUpdate = {}      
             try:
                 dev = usb.core.find(find_all=True, custom_match = self._filter)
             except:
                 dev = []
             if (dev!=[]):
-                hasNewDevices = self._compareData(dev)            
-                if (hasNewDevices!={}):
+                newDevices = self._compareData(dev)            
+                if (newDevices!={}):                    
                     for d in dev:
-                        try:
-                            if hasNewDevices[d.idVendor]==d.idProduct:
+                        #try:
+                            if newDevices[d.idVendor]==d.idProduct:
                                 device = usb.legacy.Device(d)            
-                    #print("DADOS:")            
-                    #print('Hexadecimal VendorID=' + hex(device.idVendor) + ' & ProductID=' + hex(device.idProduct))
-                    
+                                #print("DADOS:")            
+                                #print('Hexadecimal VendorID=' + hex(device.idVendor) + ' & ProductID=' + hex(device.idProduct))
+                                
                                 for items in self.deviceItems:
-                        #print("* "+items[0])
+                                    #print("* "+items[0])
                                     deviceData = ast.literal_eval(items[1])
+                                    #print("vendor id  "+ deviceData[DEVICE_VENDORID] +" - "+ str(hex(device.idVendor)))
+                                    #print("product id "+ deviceData[DEVICE_PRODUCTID] +" - "+ str(hex(device.idProduct)))
                                     if deviceData[DEVICE_VENDORID] == str(hex(device.idVendor)) and deviceData[DEVICE_PRODUCTID] == str(hex(device.idProduct)):
                                         if items[0] not in self.devicesActives.keys():
-                                            print(deviceData[DEVICE_NAME])                            
+                                            print("insert "+str(deviceData[DEVICE_NAME]))                            
                                             self.devicesActives[items[0]] = d
-                        except:
-                            pass
-              
+                                            devicesToUpdate[items[0]] = d
+                                    
+                                if devicesToUpdate != {}:
+                                    self.update(Action.ADD, devicesToUpdate)
+                        #except Exception as ex:
+                            #print("Exception: "+format(ex))
+            elif self.devicesActives != {}: 
+                self._clearDeviceList() 
+                          
             time.sleep(3)
                 
 if __name__ == '__main__':
-    usbData = findUSB()
-    usbData.run()
+    seila = {}
+    usbData = FindUSB(seila)
+    usbData.start()
     
+    def atualiza(self, isremove, data):
+        print("action -> "+isremove)
+        if isremove:
+            print("removing "+data)
+            
+        else: 
+            for key in data.keys():
+                print("Adding "+key)                
